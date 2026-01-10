@@ -5,19 +5,18 @@ import os
 from flask import Flask
 from threading import Thread
 
-# Render Port Fix (Flask)
+# Render Port Fix
 app = Flask('')
 @app.route('/')
-def home(): return "Forex AI Bot is Live!"
+def home(): return "Forex ICT AI Bot is Live!"
 
 def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 
-# ቦት መረጃ
 TOKEN = '7311692566:AAGFv2P5ioA_s_45talCetYbJQynbTAlrvc'
 bot = telebot.TeleBot(TOKEN)
 
-def get_market_analysis(symbol):
+def get_ict_analysis(symbol):
     try:
         symbol_map = {
             '🇪🇺 EUR/USD': 'EURUSD=X', '🇬🇧 GBP/USD': 'GBPUSD=X',
@@ -26,59 +25,66 @@ def get_market_analysis(symbol):
         }
         search_symbol = symbol_map.get(symbol, symbol)
         
-        # መረጃ ማምጣት
-        ticker = yf.Ticker(search_symbol)
-        df = ticker.history(period="2d", interval="15m")
-        
-        if df.empty: return "❌ መረጃ ማግኘት አልተቻለም።"
+        # ላለፉት 5 ቀናት የ 1 ሰዓት መረጃ ማምጣት
+        df = yf.download(search_symbol, period="5d", interval="1h", progress=False)
+        if df.empty or len(df) < 24: return "❌ መረጃ ማግኘት አልተቻለም።"
 
         prices = df['Close'].tolist()
+        highs = df['High'].tolist()
+        lows = df['Low'].tolist()
+        
         last_price = prices[-1]
         
-        # 1. የገበያ አዝማሚያ (Trend)
-        trend = "📈 UP" if last_price > prices[0] else "📉 DOWN"
+        # 1. Liquidity Levels (የ 24 ሰዓት ከፍተኛ እና ዝቅተኛ)
+        bsl = max(highs[-24:]) # Buy Side Liquidity
+        ssl = min(lows[-24:])  # Sell Side Liquidity
         
-        # 2. RSI ስሌት (Manual - 14 period)
-        gains = []
-        losses = []
-        for i in range(1, 15):
-            diff = prices[-i] - prices[-(i+1)]
-            gains.append(max(diff, 0))
-            losses.append(max(-diff, 0))
+        # 2. MSS / CHOCh Logic (ቀለል ያለ)
+        # ዋጋው ካለፈው ከፍተኛ ከበለጠ CHOCh (Bullish)
+        # ዋጋው ካለፈው ዝቅተኛ ካለፈ CHOCh (Bearish)
+        prev_high = highs[-2]
+        prev_low = lows[-2]
         
-        avg_gain = sum(gains) / 14
-        avg_loss = sum(losses) / 14 if sum(losses) != 0 else 0.0001
-        rs = avg_gain / avg_loss
-        rsi = 100 - (100 / (1 + rs))
+        structure = "🔄 Ranging"
+        if last_price > prev_high: structure = "🚀 CHOCh/MSS (Bullish)"
+        elif last_price < prev_low: structure = "📉 CHOCh/MSS (Bearish)"
 
-        # መልእክቱን ማዘጋጀት
-        msg = f"🎯 **የ {symbol} AI ትንታኔ**\n"
-        msg += "----------------------------------\n"
-        msg += f"💰 ዋጋ: `{last_price:.5f}`\n"
-        msg += f"📊 Trend: {trend}\n"
-        msg += f"📈 RSI: `{rsi:.2f}`\n\n"
-
-        if rsi < 35:
-            msg += "💡 **AI ምክር:** 🟢 **BUY (Oversold)**\nገበያው ሊጨምር ስለሚችል ለመግዛት አመቺ ነው።"
-        elif rsi > 65:
-            msg += "💡 **AI ምክር:** 🔴 **SELL (Overbought)**\nገበያው ሊቀንስ ስለሚችል ለመሸጥ አመቺ ነው።"
+        # 3. Stop Loss (SL) እና Take Profit (TP)
+        if "Bullish" in structure:
+            sl = ssl # ከ Liquidity በታች
+            tp = bsl # ወደ Liquidity መጠጋት
+            signal = "🟢 **BUY SETUP**"
         else:
-            msg += "💡 **AI ምክር:** 🟡 **NEUTRAL**\nገበያው ግልጽ አቅጣጫ አልያዘም።"
+            sl = bsl # ከ Liquidity በላይ
+            tp = ssl # ወደ Liquidity መጠጋት
+            signal = "🔴 **SELL SETUP**"
+
+        msg = f"🎯 **የ {symbol} ICT ትንታኔ**\n"
+        msg += "----------------------------------\n"
+        msg += f"💰 **ዋጋ:** `{last_price:.5f}`\n"
+        msg += f"🏗 **Structure:** `{structure}`\n\n"
+        
+        msg += f"🔝 **BSL:** `{bsl:.5f}`\n"
+        msg += f"⬇️ **SSL:** `{ssl:.5f}`\n\n"
+        
+        msg += f"💡 **Signal:** {signal}\n"
+        msg += f"🛑 **SL:** `{sl:.5f}`\n"
+        msg += f"🎯 **TP:** `{tp:.5f}`\n"
         
         return msg
     except Exception as e:
-        return f"⚠️ ስህተት ተከስቷል: {str(e)}"
+        return f"⚠️ ስህተት: {str(e)}"
 
 @bot.message_handler(commands=['start'])
 def start(message):
     markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add('🇪🇺 EUR/USD', '🇬🇧 GBP/USD', '🟡 GOLD (XAU/USD)', '₿ Bitcoin (BTC)', '🔄 ሌላ')
-    bot.send_message(message.chat.id, "እንኳን ወደ Forex AI ቦት መጡ! 👋\nትንታኔ ይምረጡ፡", reply_markup=markup)
+    bot.send_message(message.chat.id, "እንኳን ወደ ICT AI ቦት መጡ! ትንታኔ ይምረጡ፦", reply_markup=markup)
 
 @bot.message_handler(func=lambda m: True)
 def handle_msg(message):
-    bot.send_message(message.chat.id, "🔍 በመተንተን ላይ ነኝ... እባክዎ ይጠብቁ።")
-    result = get_market_analysis(message.text)
+    bot.send_message(message.chat.id, "🔍 የ ICT ትንታኔ በመስራት ላይ ነኝ...")
+    result = get_ict_analysis(message.text)
     bot.send_message(message.chat.id, result, parse_mode='Markdown')
 
 if __name__ == "__main__":
