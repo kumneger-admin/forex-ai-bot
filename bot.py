@@ -26,23 +26,23 @@ def get_ict_analysis(symbol):
         }
         search_symbol = symbol_map.get(symbol, symbol)
         
-        # ላለፉት 5 ቀናት የ 1 ሰዓት መረጃ
+        # ዳታ ማምጣት (1 ሰዓት)
         data = yf.download(search_symbol, period="5d", interval="1h", progress=False)
         
         if data.empty: return "❌ መረጃ ማግኘት አልተቻለም።"
 
-        # ስህተቱን ለመፍታት 'values' በመጠቀም ወደ list መቀየር
-        prices = data['Close'].values.tolist()
-        highs = data['High'].values.tolist()
-        lows = data['Low'].values.tolist()
+        # ስህተቱን ለመፍታት values.flatten() መጠቀም
+        prices = data['Close'].values.flatten().tolist()
+        highs = data['High'].values.flatten().tolist()
+        lows = data['Low'].values.flatten().tolist()
         
         last_price = prices[-1]
         
-        # 1. Liquidity Levels (የመጨረሻ 24 ሰዓት)
-        bsl = max(highs[-24:]) # Buy Side Liquidity
-        ssl = min(lows[-24:])  # Sell Side Liquidity
+        # 1. Liquidity Levels (BSL & SSL)
+        bsl = max(highs[-24:]) 
+        ssl = min(lows[-24:])  
         
-        # 2. MSS / CHOCh Logic
+        # 2. Market Structure (MSS/CHOCh)
         prev_high = highs[-2]
         prev_low = lows[-2]
         
@@ -50,7 +50,7 @@ def get_ict_analysis(symbol):
         if last_price > prev_high: structure = "🚀 CHOCh/MSS (Bullish)"
         elif last_price < prev_low: structure = "📉 CHOCh/MSS (Bearish)"
 
-        # 3. SL እና TP ስሌት
+        # 3. SL እና TP
         if "Bullish" in structure:
             sl, tp = ssl, bsl
             signal = "🟢 **BUY SETUP**"
@@ -76,7 +76,7 @@ def get_ict_analysis(symbol):
 def start(message):
     markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add('🇪🇺 EUR/USD', '🇬🇧 GBP/USD', '🟡 GOLD (XAU/USD)', '₿ Bitcoin (BTC)', '🔄 ሌላ')
-    bot.send_message(message.chat.id, "የ ICT (Liquidity/MSS) ትንታኔ ለመጀመር ይምረጡ፦", reply_markup=markup)
+    bot.send_message(message.chat.id, "ሰላም! የ ICT (Liquidity/MSS) ትንታኔ ለመጀመር ይምረጡ፦", reply_markup=markup)
 
 @bot.message_handler(func=lambda m: True)
 def handle_msg(message):
