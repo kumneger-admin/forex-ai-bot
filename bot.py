@@ -5,7 +5,7 @@ import os
 from flask import Flask
 from threading import Thread
 
-# Render Keep Alive
+# Render Port Fix (Flask)
 app = Flask('')
 @app.route('/')
 def home(): return "Forex AI Bot is Live!"
@@ -13,18 +13,11 @@ def home(): return "Forex AI Bot is Live!"
 def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 
+# ቦት መረጃ
 TOKEN = '7311692566:AAGFv2P5ioA_s_45talCetYbJQynbTAlrvc'
-ADMIN_ID = '449613656'
 bot = telebot.TeleBot(TOKEN)
 
-def calculate_rsi(data, window=14):
-    delta = data.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
-
-def get_detailed_analysis(symbol):
+def get_market_analysis(symbol):
     try:
         symbol_map = {
             '🇪🇺 EUR/USD': 'EURUSD=X', '🇬🇧 GBP/USD': 'GBPUSD=X',
@@ -34,53 +27,59 @@ def get_detailed_analysis(symbol):
         search_symbol = symbol_map.get(symbol, symbol)
         
         # መረጃ ማምጣት
-        df = yf.download(search_symbol, period="5d", interval="15m", progress=False)
-        if df.empty or len(df) < 30:
-            return "❌ በቂ የገበያ መረጃ ማግኘት አልተቻለም።"
-
-        # በራሳችን RSI እና EMA ማስላት (ከስህተት ነፃ የሆነ መንገድ)
-        close_prices = df['Close']
-        df['RSI'] = calculate_rsi(close_prices)
-        df['EMA_20'] = close_prices.ewm(span=20, adjust=False).mean()
+        ticker = yf.Ticker(search_symbol)
+        df = ticker.history(period="2d", interval="15m")
         
-        # ባዶ ያልሆኑትን የመጨረሻ እሴቶች መውሰድ
-        valid_df = df.dropna(subset=['RSI', 'EMA_20'])
-        last_row = valid_df.iloc[-1]
-        prev_row = valid_df.iloc[-2]
+        if df.empty: return "❌ መረጃ ማግኘት አልተቻለም።"
+
+        prices = df['Close'].tolist()
+        last_price = prices[-1]
         
-        l_price, l_rsi = float(last_row['Close']), float(last_row['RSI'])
-        l_ema, p_price = float(last_row['EMA_20']), float(prev_row['Close'])
+        # 1. የገበያ አዝማሚያ (Trend)
+        trend = "📈 UP" if last_price > prices[0] else "📉 DOWN"
+        
+        # 2. RSI ስሌት (Manual - 14 period)
+        gains = []
+        losses = []
+        for i in range(1, 15):
+            diff = prices[-i] - prices[-(i+1)]
+            gains.append(max(diff, 0))
+            losses.append(max(-diff, 0))
+        
+        avg_gain = sum(gains) / 14
+        avg_loss = sum(losses) / 14 if sum(losses) != 0 else 0.0001
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
 
-        analysis = f"🎯 **የ {symbol} AI ትንታኔ**\n"
-        analysis += "----------------------------------\n"
-        analysis += f"💰 **ዋጋ:** `{l_price:.5f}`\n"
-        analysis += f"📈 **RSI:** `{l_rsi:.2f}`\n"
-        analysis += f"📊 **EMA (20):** `{l_ema:.5f}`\n\n"
+        # መልእክቱን ማዘጋጀት
+        msg = f"🎯 **የ {symbol} AI ትንታኔ**\n"
+        msg += "----------------------------------\n"
+        msg += f"💰 ዋጋ: `{last_price:.5f}`\n"
+        msg += f"📊 Trend: {trend}\n"
+        msg += f"📈 RSI: `{rsi:.2f}`\n\n"
 
-        if l_rsi < 30: signal = "🟢 **BUY (Oversold)**\nገበያው በጣም ስለተሸጠ ዋጋው ሊጨምር ይችላል።"
-        elif l_rsi > 70: signal = "🔴 **SELL (Overbought)**\nገበያው በጣም ስለተገዛ ዋጋው ሊቀንስ ይችላል።"
-        elif l_price > l_ema and p_price <= l_ema: signal = "🔵 **STRONG BUY**\nዋጋው ከ EMA በላይ ወጥቷል።"
-        else: signal = "🟡 **NEUTRAL**\nገበያው ግልጽ አቅጣጫ አልያዘም።"
-
-        return analysis + f"💡 **ምክር:**\n{signal}"
+        if rsi < 35:
+            msg += "💡 **AI ምክር:** 🟢 **BUY (Oversold)**\nገበያው ሊጨምር ስለሚችል ለመግዛት አመቺ ነው።"
+        elif rsi > 65:
+            msg += "💡 **AI ምክር:** 🔴 **SELL (Overbought)**\nገበያው ሊቀንስ ስለሚችል ለመሸጥ አመቺ ነው።"
+        else:
+            msg += "💡 **AI ምክር:** 🟡 **NEUTRAL**\nገበያው ግልጽ አቅጣጫ አልያዘም።"
+        
+        return msg
     except Exception as e:
-        return f"⚠️ ስህተት: ትንታኔውን መስራት አልተቻለም።"
+        return f"⚠️ ስህተት ተከስቷል: {str(e)}"
 
 @bot.message_handler(commands=['start'])
 def start(message):
     markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
-    markup.add('🇪🇺 EUR/USD', '🇬🇧 GBP/USD', '🇯🇵 USD/JPY', '🟡 GOLD (XAU/USD)', '₿ Bitcoin (BTC)', '🔄 ሌላ ምልክት ለመጻፍ')
-    bot.send_message(message.chat.id, "እንኳን ወደ Forex AI ቦት መጡ! 👋\nጥንድ ይምረጡ፡", reply_markup=markup)
+    markup.add('🇪🇺 EUR/USD', '🇬🇧 GBP/USD', '🟡 GOLD (XAU/USD)', '₿ Bitcoin (BTC)', '🔄 ሌላ')
+    bot.send_message(message.chat.id, "እንኳን ወደ Forex AI ቦት መጡ! 👋\nትንታኔ ይምረጡ፡", reply_markup=markup)
 
 @bot.message_handler(func=lambda m: True)
-def handle_all(message):
-    if message.text == '🔄 ሌላ ምልክት ለመጻፍ':
-        bot.send_message(message.chat.id, "ምልክቱን ይጻፉ (ለምሳሌ፦ `AUDUSD=X`)፡")
-        return
-    bot.send_message(message.chat.id, f"🔍 የ {message.text} ገበያን በመተንተን ላይ ነኝ...")
-    result = get_detailed_analysis(message.text)
+def handle_msg(message):
+    bot.send_message(message.chat.id, "🔍 በመተንተን ላይ ነኝ... እባክዎ ይጠብቁ።")
+    result = get_market_analysis(message.text)
     bot.send_message(message.chat.id, result, parse_mode='Markdown')
-    bot.send_message(ADMIN_ID, f"🔔 @{message.from_user.username} {message.text} ጠይቋል።")
 
 if __name__ == "__main__":
     Thread(target=run_flask).start()
